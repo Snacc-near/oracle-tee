@@ -126,3 +126,50 @@ test("fetchAttestationReport meneruskan JSON apa adanya", async () => {
   const rep = (await fetchAttestationReport({ fetchImpl })) as { attestation: string };
   assert.equal(rep.attestation, "ok");
 });
+
+// RES-101 — jalur SDK resmi NEAR AI: semua panggilan via klien SDK + verifyResponse.
+import { runGenomeExperimentViaSdk, type SdkClientLike } from "../src/enclave-client.js";
+
+test("RES-101: runGenomeExperimentViaSdk — panggilan via client.fetch + verifyResponse(chatId)", async () => {
+  clearExperimentCache();
+  const dipanggil: string[] = [];
+  const client: SdkClientLike = {
+    fetch: mockFetch({
+      "https://cloud-api.near.ai/v1/chat/completions": () => ok(ENVELOPE),
+      "https://cloud-api.near.ai/v1/signature/": () => ok(JSON.stringify({ signature: SIG, signing_address: PUBKEY })),
+    }) as unknown as SdkClientLike["fetch"],
+    verifyResponse: async (id: string) => {
+      dipanggil.push(id);
+      return { signatureKind: "ed25519" };
+    },
+  };
+  const r = await runGenomeExperimentViaSdk(fakePipeline(), {
+    apiKey: "uji",
+    client,
+    skipSignatureVerification: true,
+  });
+  assert.equal(r.chatId, "chat-abc");
+  assert.equal(r.sdkVerified, true);
+  assert.deepEqual(dipanggil, ["chat-abc"], "verifyResponse dipanggil dengan chatId");
+});
+
+test("RES-101: verifyResponse gagal -> sdkVerified false, bukti lokal tetap utuh", async () => {
+  clearExperimentCache();
+  const client: SdkClientLike = {
+    fetch: mockFetch({
+      "https://cloud-api.near.ai/v1/chat/completions": () => ok(ENVELOPE),
+      "https://cloud-api.near.ai/v1/signature/": () => ok(JSON.stringify({ signature: SIG, signing_address: PUBKEY })),
+    }) as unknown as SdkClientLike["fetch"],
+    verifyResponse: async () => {
+      throw new Error("signature mismatch");
+    },
+  };
+  const r = await runGenomeExperimentViaSdk(fakePipeline(), {
+    apiKey: "uji",
+    client,
+    skipSignatureVerification: true,
+  });
+  assert.equal(r.sdkVerified, false);
+  assert.equal(r.chatId, "chat-abc", "hasil eksperimen tetap ada");
+  assert.ok(r.rawResponseSha256.length === 64, "res sha tetap dihitung");
+});

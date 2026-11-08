@@ -165,3 +165,49 @@ export async function fetchAttestationReport(opts: { apiKey?: string; fetchImpl?
   if (!res.ok) throw new Error(`ERR_ATTESTATION_REPORT_FAILED: HTTP ${res.status}`);
   return JSON.parse(await res.text());
 }
+
+// ---------------------------------------------------------------------------
+// `RES-101` — jalur SDK resmi NEAR AI (`@nearai/inference-sdk`).
+// Semua panggilan HTTP via klien SDK (gateway attestation + TLS pinning aktif),
+// sementara protokol zero-trust on-chain kita tetap memakai byte mentah yang utuh
+// (req/res sha256 + ed25519 lokal), plus verifikasi tanda tangan SDK di atasnya.
+// ---------------------------------------------------------------------------
+
+export interface SdkClientLike {
+  fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  verifyResponse?: (id: string) => Promise<unknown>;
+}
+
+/** Klien produksi dari `@nearai/inference-sdk/node` (lazy import, ESM). */
+export async function defaultSdkClient(apiKey: string): Promise<SdkClientLike> {
+  const mod = (await import("@nearai/inference-sdk/node")) as unknown as {
+    InferenceClient: new (o: { apiKey: string }) => SdkClientLike;
+  };
+  return new mod.InferenceClient({ apiKey });
+}
+
+export async function runGenomeExperimentViaSdk(
+  pipeline: PipelineOutput,
+  opts: {
+    apiKey: string;
+    client?: SdkClientLike;
+    skipSignatureVerification?: boolean;
+  },
+): Promise<ExperimentResult & { sdkVerified: boolean }> {
+  const client = opts.client ?? (await defaultSdkClient(opts.apiKey));
+  // Semua fetch (chat completions + signature) lewat transport SDK.
+  const result = await runGenomeExperiment(pipeline, {
+    fetchImpl: (url, init) => client.fetch(url, init),
+    skipSignatureVerification: opts.skipSignatureVerification,
+  });
+  let sdkVerified = false;
+  try {
+    if (client.verifyResponse) {
+      await client.verifyResponse(result.chatId);
+      sdkVerified = true;
+    }
+  } catch {
+    sdkVerified = false; // verifikasi SDK gagal TIDAK membatalkan bukti lokal kita
+  }
+  return { ...result, sdkVerified };
+}
