@@ -185,3 +185,59 @@ describe("TEE-103 — pipeline konsisten commit_genome_experiment", () => {
     assert.match(out.request_sha256_hex, /^[0-9a-f]{64}$/);
   });
 });
+
+// RES-102 — Layer 1.5 `/v1/privacy/classify` sebelum redact (Dual-Layer sejati).
+import { cloudClassify } from "../src/pipeline.js";
+
+describe("RES-102 — Layer 1.5 classify sebelum redact", () => {
+  test("HTTP 200 dengan label -> classification tercatat", async () => {
+    const r = await cloudClassify("x", {
+      fetchImpl: makeStubFetch(200, { label: "trade-secret" }) as typeof fetch,
+    });
+    assert.equal(r.label, "trade-secret");
+    assert.equal(r.warning, undefined);
+  });
+
+  test("HTTP 404 -> label null + warning, tidak melempar", async () => {
+    const r = await cloudClassify("x", { fetchImpl: makeStubFetch(404, {}) as typeof fetch });
+    assert.equal(r.label, null);
+    assert.match(r.warning ?? "", /404/);
+  });
+
+  test("pipeline: classify dipanggil SEBELUM redact dan hasilnya masuk PipelineOutput", async () => {
+    const urutan: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      if (String(url).includes("classify")) {
+        urutan.push("classify");
+        return new Response(JSON.stringify({ sensitivity: "confidential" }), { status: 200 });
+      }
+      urutan.push("redact");
+      return new Response(JSON.stringify({}), { status: 404 });
+    }) as unknown as typeof fetch;
+    const out = await runGenomeRedactionPipeline({
+      strainId: 1,
+      payloadText: "resep: identitas=ratio 1:2",
+      rawFormula: "1:2",
+      saltHex: "a".repeat(32),
+      cloud: { fetchImpl },
+    });
+    assert.deepEqual(urutan, ["classify", "redact"], "urutan wajib classify -> redact");
+    assert.equal(out.classification, "confidential");
+  });
+
+  test("pipeline tetap jalan saat classify gagal (fallback)", async () => {
+    const fetchImpl = (async (url: string) => {
+      if (String(url).includes("classify")) throw new Error("network down");
+      return new Response(JSON.stringify({}), { status: 404 });
+    }) as unknown as typeof fetch;
+    const out = await runGenomeRedactionPipeline({
+      strainId: 1,
+      payloadText: "x",
+      rawFormula: "y",
+      saltHex: "b".repeat(32),
+      cloud: { fetchImpl },
+    });
+    assert.equal(out.classification, null);
+    assert.ok(out.warnings.some((w) => w.includes("layer1.5")), "warning classify tercatat");
+  });
+});

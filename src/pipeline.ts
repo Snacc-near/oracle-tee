@@ -23,6 +23,7 @@ import {
 } from "./redact.js";
 
 export const CLOUD_REDACT_ENDPOINT = "https://cloud-api.near.ai/v1/privacy/redact";
+export const CLOUD_CLASSIFY_ENDPOINT = "https://cloud-api.near.ai/v1/privacy/classify";
 export const TEE_MODEL = "z-ai/glm-5.3-flash";
 
 /** System prompt rubrik deterministik — disalin PERSIS dari spec §1 Tahap 2. */
@@ -41,6 +42,48 @@ export interface CloudRedactResult {
 }
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
+
+export interface CloudClassifyResult {
+  /** Label klasifikasi dari `/v1/privacy/classify`; `null` bila endpoint tak tersedia. */
+  label: string | null;
+  warning?: string;
+}
+
+/**
+ * `RES-102` — Layer 1.5: klasifikasi sensitivitas SEBELUM redact (Dual-Layer sejati).
+ * Tidak pernah melempar exception: 404/5xx/jaringan → `label: null` + warning.
+ */
+export async function cloudClassify(
+  payload: string,
+  opts: { endpoint?: string; model?: string; apiKey?: string; fetchImpl?: FetchLike } = {},
+): Promise<CloudClassifyResult> {
+  const endpoint = opts.endpoint ?? CLOUD_CLASSIFY_ENDPOINT;
+  const doFetch: FetchLike = opts.fetchImpl ?? ((url, init) => fetch(url, init));
+  try {
+    const res = await doFetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(opts.apiKey ? { authorization: `Bearer ${opts.apiKey}` } : {}),
+      },
+      body: JSON.stringify({ model: opts.model ?? TEE_MODEL, input: payload }),
+    });
+    if (res.status === 404) {
+      return { label: null, warning: "layer1.5: /v1/privacy/classify 404 — klasifikasi dilewati" };
+    }
+    if (!res.ok) {
+      return { label: null, warning: `layer1.5: classify HTTP ${res.status} — klasifikasi dilewati` };
+    }
+    const j = (await res.json()) as Record<string, unknown>;
+    const label =
+      [j.label, j.classification, j.sensitivity, j.risk].find(
+        (v) => typeof v === "string" && v.length > 0,
+      ) ?? null;
+    return label ? { label: label as string } : { label: null, warning: "layer1.5: classify tanpa label dikenal" };
+  } catch (e) {
+    return { label: null, warning: `layer1.5: classify gagal (${String(e).slice(0, 80)})` };
+  }
+}
 
 /**
  * Layer 2 — probe redaksi cloud. Tidak pernah melempar exception:
@@ -133,6 +176,8 @@ export interface PipelineOutput {
   salt_hex: string;
   /** Canonical request body yang di-hash (untuk replay/audit — lihat ambiguitas A4). */
   request_body: string;
+  /** `RES-102` — label klasifikasi `/v1/privacy/classify` (null bila endpoint tak tersedia). */
+  classification?: string | null;
 }
 
 /**
@@ -148,6 +193,10 @@ export async function runGenomeRedactionPipeline(
   const warnings = [...layer1.warnings];
   let payload = layer1.payload_terredaksi;
   let mode = REDACTION_MODE_LOCAL;
+
+  // Layer 1.5 (`RES-102`) — klasifikasi sebelum redact (Dual-Layer sejati), fallback 404.
+  const classify = await cloudClassify(payload, input.cloud);
+  if (classify.warning) warnings.push(classify.warning);
 
   // Layer 2 — opsional, fallback tanpa gagal.
   const cloud = await cloudRedact(payload, input.cloud);
@@ -180,5 +229,6 @@ export async function runGenomeRedactionPipeline(
     commitment_hex: layer1.commitment_hex,
     salt_hex: layer1.salt_hex,
     request_body: requestBody,
+    classification: classify.label,
   };
 }
