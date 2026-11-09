@@ -99,9 +99,9 @@ describe("TEE-102 — Layer 2 cloud redaction + fallback", () => {
 
   test("HTTP 200 with a `redacted` field → the cloud mode", async () => {
     const r = await cloudRedact("x", {
-      fetchImpl: makeStubFetch(200, { redacted: "hasil-cloud" }) as typeof fetch,
+      fetchImpl: makeStubFetch(200, { redacted: "cloud-result" }) as typeof fetch,
     });
-    assert.equal(r.text, "hasil-cloud");
+    assert.equal(r.text, "cloud-result");
     assert.equal(r.mode, "cloud");
     assert.equal(r.warning, undefined);
   });
