@@ -155,7 +155,7 @@ export interface PipelineInput {
   rawFormula: string;
   /** An explicit salt (for determinism/tests); when absent, a random salt per request. */
   saltHex?: string;
-  /** Konfigurasi Layer 2 (endpoint/apiKey/fetch stub). */
+  /** The Layer 2 configuration (endpoint/apiKey/fetch stub). */
   cloud?: { endpoint?: string; apiKey?: string; fetchImpl?: FetchLike };
 }
 
