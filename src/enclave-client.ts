@@ -155,7 +155,7 @@ export async function runGenomeExperiment(
   return result;
 }
 
-/** Laporan attestation hardware enclave (`/v1/attestation/report`) — diteruskan apa adanya. */
+/** The hardware enclave attestation report (`/v1/attestation/report`) — passed through as-is. */
 export async function fetchAttestationReport(opts: { apiKey?: string; fetchImpl?: FetchLike } = {}): Promise<unknown> {
   const doFetch: FetchLike = opts.fetchImpl ?? ((url, init) => fetch(url, init));
   const res = await doFetch(ATTESTATION_REPORT_URL, {
