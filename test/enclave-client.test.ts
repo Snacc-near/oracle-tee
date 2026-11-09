@@ -1,5 +1,5 @@
-// Test TEE-105..108 — klien enclave (mock fetch untuk alur; vektor RIIL untuk ed25519).
-// Vektor rial: spike S1.8/S2.6 (chat_id c895b8f389fe45f3b369417a6de52536).
+// TEE-105..108 tests — the enclave client (a mock fetch for the flows; REAL vectors for ed25519).
+// The real vectors: spike S1.8/S2.6 (chat_id c895b8f389fe45f3b369417a6de52536).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -46,22 +46,22 @@ function mockFetch(handlers: Record<string, () => Response>) {
 
 const ok = (body: string) => new Response(body, { status: 200 });
 
-test("verifyEd25519 meluluskan vektor RIIL spike S2.6", () => {
+test("verifyEd25519 accepts the REAL spike S2.6 vector", () => {
   assert.equal(verifyEd25519(PUBKEY, SIGNED_TEXT, SIG), true);
 });
 
-test("verifyEd25519 menolak signature yang diubah 1 byte", () => {
+test("verifyEd25519 rejects a signature flipped by 1 byte", () => {
   const flipped = "0" + SIG.slice(1);
   assert.equal(verifyEd25519(PUBKEY, SIGNED_TEXT, flipped), false);
 });
 
-test("validateMutation menolak shift > 1500 dan vitality > 500", () => {
+test("validateMutation rejects a shift > 1500 and a vitality > 500", () => {
   assert.throws(() => validateMutation({ efficiency_shift_bps: 1501, vitality_bonus: 0 }), /ERR_GUARDRAIL_SHIFT/);
   assert.throws(() => validateMutation({ efficiency_shift_bps: 0, vitality_bonus: 501 }), /ERR_GUARDRAIL_VITALITY/);
   validateMutation({ efficiency_shift_bps: -1500, vitality_bonus: 500 });
 });
 
-test("runGenomeExperiment: alur sukses (mock) + caching", async () => {
+test("runGenomeExperiment: a successful flow (mock) + caching", async () => {
   clearExperimentCache();
   let chatCalls = 0;
   const fetchImpl = mockFetch({
@@ -70,21 +70,21 @@ test("runGenomeExperiment: alur sukses (mock) + caching", async () => {
   });
   const r = await runGenomeExperiment(fakePipeline(), { fetchImpl, skipSignatureVerification: true });
   assert.equal(r.chatId, "chat-abc");
-  // signedText = rekonstruksi lokal atas body mock (format S2.6); vektor rial diuji terpisah.
+  // signedText = the local reconstruction over the mock body (the S2.6 format); the real vectors are tested separately.
   assert.equal(r.signedText, `z-ai/glm-5.3-flash:${REQ_SHA}:${r.rawResponseSha256}`);
   assert.equal(r.mutation.efficiency_shift_bps, 450);
   assert.equal(r.mutation.vitality_bonus, 200);
-  // cache: panggilan kedua tidak menyentuh jaringan lagi
+  // cache: the second call does not touch the network again
   const r2 = await runGenomeExperiment(fakePipeline(), { fetchImpl, skipSignatureVerification: true });
   assert.equal(r2.chatId, "chat-abc");
   assert.equal(chatCalls, 1);
 });
 
-test("runGenomeExperiment: signed_text server tidak cocok -> ditolak", async () => {
+test("runGenomeExperiment: a server signed_text mismatch -> rejected", async () => {
   clearExperimentCache();
   const fetchImpl = mockFetch({
     "https://cloud-api.near.ai/v1/chat/completions": () => ok(ENVELOPE),
-    "https://cloud-api.near.ai/v1/signature/": () => ok(JSON.stringify({ text: "teks-salah", signature: SIG, signing_address: PUBKEY })),
+    "https://cloud-api.near.ai/v1/signature/": () => ok(JSON.stringify({ text: "wrong-text", signature: SIG, signing_address: PUBKEY })),
   });
   await assert.rejects(
     () => runGenomeExperiment(fakePipeline(), { fetchImpl, skipSignatureVerification: true }),
@@ -92,21 +92,21 @@ test("runGenomeExperiment: signed_text server tidak cocok -> ditolak", async () 
   );
 });
 
-test("runGenomeExperiment: verifikasi ed25519 gagal (mock body) -> ditolak", async () => {
+test("runGenomeExperiment: the ed25519 verification fails (a mock body) -> rejected", async () => {
   clearExperimentCache();
   const fetchImpl = mockFetch({
     "https://cloud-api.near.ai/v1/chat/completions": () => ok(ENVELOPE),
     "https://cloud-api.near.ai/v1/signature/": () => ok(JSON.stringify({ text: SIGNED_TEXT, signature: SIG, signing_address: PUBKEY })),
   });
-  // signedText hasil rekonstruksi lokal atas body mock PASTI berbeda hash-nya dari vektor rial,
-  // sehingga verifikasi kriptografis gagal — inilah yang membuktikan tidak ada jalan lolos.
+  // The signedText from the local reconstruction over the mock body MUST hash differently from the real vector,
+  // so the cryptographic verification fails — that is exactly what proves there is no way through.
   await assert.rejects(
     () => runGenomeExperiment(fakePipeline(), { fetchImpl }),
     /ERR_TEE_SIGNED_TEXT_MISMATCH|ERR_TEE_RESPONSE_HASH_OR_ED25519_MISMATCH/,
   );
 });
 
-test("runGenomeExperiment: mutasi di luar guardrail I-03 -> ditolak", async () => {
+test("runGenomeExperiment: a mutation outside the I-03 guardrail -> rejected", async () => {
   clearExperimentCache();
   const bad = JSON.stringify({ id: "chat-x", choices: [{ message: { content: '{"efficiency_shift_bps":9000,"vitality_bonus":0}' } }] });
   const fetchImpl = mockFetch({
@@ -119,7 +119,7 @@ test("runGenomeExperiment: mutasi di luar guardrail I-03 -> ditolak", async () =
   );
 });
 
-test("fetchAttestationReport meneruskan JSON apa adanya", async () => {
+test("fetchAttestationReport passes the JSON through as-is", async () => {
   const fetchImpl = mockFetch({
     "https://cloud-api.near.ai/v1/attestation/report": () => ok(JSON.stringify({ attestation: "ok", quote: "hex" })),
   });
@@ -127,33 +127,33 @@ test("fetchAttestationReport meneruskan JSON apa adanya", async () => {
   assert.equal(rep.attestation, "ok");
 });
 
-// RES-101 — jalur SDK resmi NEAR AI: semua panggilan via klien SDK + verifyResponse.
+// RES-101 — the official NEAR AI SDK path: every call via the SDK client + verifyResponse.
 import { runGenomeExperimentViaSdk, type SdkClientLike } from "../src/enclave-client.js";
 
-test("RES-101: runGenomeExperimentViaSdk — panggilan via client.fetch + verifyResponse(chatId)", async () => {
+test("RES-101: runGenomeExperimentViaSdk — calls via client.fetch + verifyResponse(chatId)", async () => {
   clearExperimentCache();
-  const dipanggil: string[] = [];
+  const called: string[] = [];
   const client: SdkClientLike = {
     fetch: mockFetch({
       "https://cloud-api.near.ai/v1/chat/completions": () => ok(ENVELOPE),
       "https://cloud-api.near.ai/v1/signature/": () => ok(JSON.stringify({ signature: SIG, signing_address: PUBKEY })),
     }) as unknown as SdkClientLike["fetch"],
     verifyResponse: async (id: string) => {
-      dipanggil.push(id);
+      called.push(id);
       return { signatureKind: "ed25519" };
     },
   };
   const r = await runGenomeExperimentViaSdk(fakePipeline(), {
-    apiKey: "uji",
+    apiKey: "test",
     client,
     skipSignatureVerification: true,
   });
   assert.equal(r.chatId, "chat-abc");
   assert.equal(r.sdkVerified, true);
-  assert.deepEqual(dipanggil, ["chat-abc"], "verifyResponse dipanggil dengan chatId");
+  assert.deepEqual(called, ["chat-abc"], "verifyResponse is called with the chatId");
 });
 
-test("RES-101: verifyResponse gagal -> sdkVerified false, bukti lokal tetap utuh", async () => {
+test("RES-101: a failed verifyResponse -> sdkVerified false, the local proof stays intact", async () => {
   clearExperimentCache();
   const client: SdkClientLike = {
     fetch: mockFetch({
@@ -165,11 +165,11 @@ test("RES-101: verifyResponse gagal -> sdkVerified false, bukti lokal tetap utuh
     },
   };
   const r = await runGenomeExperimentViaSdk(fakePipeline(), {
-    apiKey: "uji",
+    apiKey: "test",
     client,
     skipSignatureVerification: true,
   });
   assert.equal(r.sdkVerified, false);
-  assert.equal(r.chatId, "chat-abc", "hasil eksperimen tetap ada");
-  assert.ok(r.rawResponseSha256.length === 64, "res sha tetap dihitung");
+  assert.equal(r.chatId, "chat-abc", "the experiment result still exists");
+  assert.ok(r.rawResponseSha256.length === 64, "the res sha is still computed");
 });

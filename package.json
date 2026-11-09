@@ -2,7 +2,7 @@
   "name": "snacc-tee-redactor",
   "version": "0.1.0",
   "private": true,
-  "description": "TEE-101..104 — Dual-Layer Redaction (ADR-05) untuk pipeline genome NEAR AI Cloud TEE (M3 tee-genome-oracle)",
+  "description": "TEE-101..104 — Dual-Layer Redaction (ADR-05) for the NEAR AI Cloud TEE genome pipeline (M3 tee-genome-oracle)",
   "type": "module",
   "engines": {
     "node": ">=20"
